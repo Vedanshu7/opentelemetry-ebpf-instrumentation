@@ -88,8 +88,12 @@ func (e *RouteExtractor) resolveASTRoutes(filePath, src string) []RoutePattern {
 			return
 		}
 		first := call.ArgumentList[0]
-		// Plain string literals are already handled by the regex pass.
+		// Plain string literals and no-interpolation template literals are already
+		// handled by the regex pass.
 		if _, isLit := first.(*ast.StringLiteral); isLit {
+			return
+		}
+		if tmpl, isTmpl := first.(*ast.TemplateLiteral); isTmpl && len(tmpl.Expressions) == 0 {
 			return
 		}
 		path, ok := stringValue(first, strVars)

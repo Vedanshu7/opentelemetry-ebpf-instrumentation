@@ -132,3 +132,10 @@ func TestResolveASTRoutes_IgnoresUnknownMethod(t *testing.T) {
 	got := (&RouteExtractor{}).resolveASTRoutes("app.js", `const p = '/x'; app.listen(p);`)
 	assert.Empty(t, got)
 }
+
+func TestResolveASTRoutes_IgnoresTemplateLiteralWithoutInterpolation(t *testing.T) {
+	// Backtick strings with no ${} are already caught by the regex pass; the
+	// AST pass must not re-emit them to avoid duplicates in GetRoutes().
+	got := (&RouteExtractor{}).resolveASTRoutes("app.js", "app.get(`/static`, handler);")
+	assert.Empty(t, got)
+}
