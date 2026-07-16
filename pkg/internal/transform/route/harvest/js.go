@@ -127,6 +127,10 @@ type FrameworkPatterns struct {
 	QuotedString *regexp.Regexp
 	// HTTPDispatcher: dispatcher.onGet('/path', ...), dispatcher.onPost(/^\/ratings\/[0-9]*/, ...)
 	HTTPDispatcher *regexp.Regexp
+	// NonLiteralRoute: a route registration whose first argument is not a
+	// plain string literal (a variable, a template interpolation, or a string
+	// concatenation); such files need the AST pass to resolve the path
+	NonLiteralRoute *regexp.Regexp
 	// Fallback
 	Fallback *regexp.Regexp
 
@@ -212,6 +216,10 @@ func newFrameworkPatterns() *FrameworkPatterns {
 		// Matches: dispatcher.onGet('/path', ...), dispatcher.onPost(/^\/ratings\/[0-9]*/, ...)
 		// Supports both string literals and regex literals
 		HTTPDispatcher: regexp.MustCompile(`\.on(Get|Post|Put|Patch|Delete|Head|Options|All)\s*\(\s*(?:['"\x60]([^'"\x60]+)['"\x60]|/((?:[^\\,]|\\.)+))`),
+
+		// Matches: app.get(usersPath, ...), app.get(`/api/${ver}/users`, ...),
+		// app.put(base + '/settings', ...)
+		NonLiteralRoute: regexp.MustCompile(`\.(get|post|put|patch|delete|del|head|options|all)\s*\(\s*(?:[^'"\x60\s)]|\x60[^\x60]*\$\{|['"\x60][^'"\x60]*['"\x60]\s*\+)`),
 
 		// Fallback (e.g. NextJS)
 		Fallback: regexp.MustCompile(`['"\x60](/[^'"\x60]+)['"\x60]`),
@@ -852,6 +860,7 @@ func (e *RouteExtractor) scanFile(filePath string) error {
 	lineNum := 0
 	var line string
 	var save string
+	astCandidate := false
 
 	// NestJS controller prefixes, versions, and buffered decorator stacks
 	// never span files
@@ -885,6 +894,10 @@ func (e *RouteExtractor) scanFile(filePath string) error {
 		// decorator stack of a buffered NestJS method
 		if e.pendingNestMethod != nil && !strings.HasPrefix(trimmed, "@") {
 			e.flushNestMethod()
+		}
+
+		if !astCandidate && e.patterns.NonLiteralRoute.MatchString(line) {
+			astCandidate = true
 		}
 
 		// Check for .route() pattern for chained handlers
@@ -973,6 +986,16 @@ func (e *RouteExtractor) scanFile(filePath string) error {
 
 	if err := scanner.Err(); err != nil {
 		return err
+	}
+
+	if astCandidate {
+		src, ok, err := readJSFileForScan(filePath)
+		if err != nil {
+			return err
+		}
+		if ok {
+			e.routes = append(e.routes, e.resolveASTRoutes(filePath, src)...)
+		}
 	}
 
 	return nil
